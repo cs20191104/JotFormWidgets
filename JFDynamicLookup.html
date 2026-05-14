@@ -5,6 +5,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>JotForm Table Lookup Widget</title>
+
+  <!-- ✅ Required: JotForm Widget API -->
+
+  <script src="https://js.jotform.com/JotFormCustomWidget.min.js"></script>
+
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -32,12 +37,13 @@
       transition: border-color .15s, box-shadow .15s;
     }
     select:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,.15); }
-    select:disabled { background: #f9fafb; color: #9ca3af; cursor: not-allowed; }
     .chevron {
       pointer-events: none; position: absolute; right: 10px;
       top: 50%; transform: translateY(-50%); color: #9ca3af;
     }
     .hidden { display: none !important; }
+
+    /* Builder config panel - only shown outside JotForm */
     .builder-config {
       background: #f8fafc; border: 1px dashed #cbd5e1;
       border-radius: 8px; padding: 16px; margin-bottom: 12px;
@@ -64,8 +70,11 @@
     .btn-load:hover { background: #4f46e5; }
     .btn-load:disabled { background: #a5b4fc; cursor: not-allowed; }
   </style>
+
 </head>
 <body>
+
+  <!-- Config panel: only visible when opened directly in browser, not in JotForm -->
 
   <div class="builder-config" id="builderConfig">
     <h3>🔧 Widget Setup — users won't see this</h3>
@@ -87,7 +96,7 @@
       <div class="field-group">
         <label class="field-label">Hidden Value Column</label>
         <input type="text" id="lookupCol" placeholder="e.g. SKU" />
-        <div class="field-hint">Value that gets submitted</div>
+        <div class="field-hint">Value submitted</div>
       </div>
     </div>
     <div class="field-group">
@@ -101,6 +110,7 @@
     <div class="spinner"></div><span>Loading options…</span>
   </div>
   <div id="errorState" class="error-box hidden"></div>
+
   <div id="dropdownWrap" class="select-wrap hidden">
     <select id="mainSelect" onchange="onSelectChange(this)">
       <option value="">Select an option…</option>
@@ -109,25 +119,38 @@
       <path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clip-rule="evenodd"/>
     </svg>
   </div>
+
   <input type="hidden" id="hiddenValue" name="lookupValue" value="" />
 
 <script>
   let lookupMap = {};
-  const isEmbedded = typeof JFCustomWidget !== "undefined";
 
-  if (isEmbedded) {
+  // ── JotForm Widget API setup ──────────────────
+  JFCustomWidget.subscribe("ready", function () {
+    // Hide config panel — we're inside JotForm
     document.getElementById("builderConfig").classList.add("hidden");
-    JFCustomWidget.subscribe("ready", function () {
-      const s = (k) => JFCustomWidget.getWidgetSetting(k) || "";
-      loadTable(s("apiKey"), s("tableId"), s("displayCol"), s("lookupCol"), s("placeholder") || "Select an option…");
-    });
-    JFCustomWidget.subscribe("submit", function () {
-      const val = document.getElementById("hiddenValue").value;
-      JFCustomWidget.sendSubmit({ value: val, valid: val !== "" });
-    });
-  }
 
+    const apiKey     = JFCustomWidget.getWidgetSetting("apiKey")     || "";
+    const tableId    = JFCustomWidget.getWidgetSetting("tableId")    || "";
+    const displayCol = JFCustomWidget.getWidgetSetting("displayCol") || "";
+    const lookupCol  = JFCustomWidget.getWidgetSetting("lookupCol")  || "";
+    const placeholder = JFCustomWidget.getWidgetSetting("placeholder") || "Select an option…";
+
+    if (apiKey && tableId && displayCol && lookupCol) {
+      loadTable(apiKey, tableId, displayCol, lookupCol, placeholder);
+    } else {
+      showError("Widget not configured. Please set API Key, Table ID, and column names in the widget settings.");
+    }
+  });
+
+  JFCustomWidget.subscribe("submit", function () {
+    const val = document.getElementById("hiddenValue").value;
+    JFCustomWidget.sendSubmit({ value: val, valid: val !== "" });
+  });
+
+  // ── Load table rows from JotForm API ─────────
   async function loadTable(apiKey, tableId, displayCol, lookupCol, placeholder) {
+    // Called from builder button — read from inputs
     if (!apiKey) {
       apiKey      = document.getElementById("apiKey").value.trim();
       tableId     = document.getElementById("tableId").value.trim();
@@ -136,18 +159,25 @@
       placeholder = document.getElementById("placeholder").value.trim() || "Select an option…";
     }
     if (!apiKey || !tableId || !displayCol || !lookupCol) {
-      showError("Please fill in all configuration fields above."); return;
+      showError("Please fill in all configuration fields."); return;
     }
+
     const btn = document.getElementById("btnLoad");
     if (btn) btn.disabled = true;
     showLoading();
+
     try {
-      const url = `https://api.jotform.com/form/${tableId}/submissions?apiKey=${encodeURIComponent(apiKey)}&limit=1000&orderby=created_at`;
+      const url = `https://api.jotform.com/form/${tableId}/submissions` +
+                  `?apiKey=${encodeURIComponent(apiKey)}&limit=1000&orderby=created_at`;
       const res  = await fetch(url);
       const json = await res.json();
+
       if (json.responseCode !== 200) throw new Error(json.message || `API error ${json.responseCode}`);
+
       const subs = (json.content || []).filter(s => s.status !== "DELETED");
       if (!subs.length) throw new Error("No rows found. Check the Table ID or add rows first.");
+
+      // Find which question key maps to each column name
       const firstAnswers = subs[0].answers || {};
       let displayKey = null, lookupKey = null;
       for (const [qid, ans] of Object.entries(firstAnswers)) {
@@ -157,6 +187,8 @@
       }
       if (!displayKey) throw new Error(`Column "${displayCol}" not found. Available: ${Object.values(firstAnswers).map(a=>a.name).filter(Boolean).join(", ")}`);
       if (!lookupKey)  throw new Error(`Column "${lookupCol}" not found. Available: ${Object.values(firstAnswers).map(a=>a.name).filter(Boolean).join(", ")}`);
+
+      // Build dropdown
       lookupMap = {};
       const sel = document.getElementById("mainSelect");
       sel.innerHTML = `<option value="">${placeholder}</option>`;
@@ -170,6 +202,7 @@
         sel.appendChild(opt);
       }
       showDropdown(placeholder);
+
     } catch (err) {
       showError(err.message);
     } finally {
@@ -189,7 +222,7 @@
   function onSelectChange(sel) {
     const hidden = sel.value ? (lookupMap[sel.value] || "") : "";
     document.getElementById("hiddenValue").value = hidden;
-    if (isEmbedded) JFCustomWidget.sendData({ value: hidden, valid: hidden !== "" });
+    JFCustomWidget.sendData({ value: hidden, valid: hidden !== "" });
   }
 
   function showLoading() {
@@ -208,7 +241,7 @@
     document.getElementById("dropdownWrap").classList.remove("hidden");
     document.getElementById("loadingState").classList.add("hidden");
     document.getElementById("errorState").classList.add("hidden");
-    if (isEmbedded) JFCustomWidget.requestFrameResize({ height: 50 });
+    JFCustomWidget.requestFrameResize({ height: 50 });
   }
 </script>
 
