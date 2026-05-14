@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>JotForm Table Lookup Widget</title>
 
-  <!-- ✅ Required: JotForm Widget API -->
+  <!-- JotForm Widget API - must be first -->
 
   <script src="https://js.jotform.com/JotFormCustomWidget.min.js"></script>
 
@@ -42,69 +42,10 @@
       top: 50%; transform: translateY(-50%); color: #9ca3af;
     }
     .hidden { display: none !important; }
-
-    /* Builder config panel - only shown outside JotForm */
-    .builder-config {
-      background: #f8fafc; border: 1px dashed #cbd5e1;
-      border-radius: 8px; padding: 16px; margin-bottom: 12px;
-    }
-    .builder-config h3 {
-      font-size: 11px; font-weight: 700; text-transform: uppercase;
-      letter-spacing: .06em; color: #94a3b8; margin-bottom: 12px;
-    }
-    .field-group { margin-bottom: 10px; }
-    .field-label { display: block; font-size: 11px; font-weight: 600; color: #475569; margin-bottom: 4px; }
-    .field-hint { font-size: 11px; color: #94a3b8; margin-top: 3px; }
-    input[type="text"], input[type="password"] {
-      width: 100%; padding: 7px 10px; border: 1px solid #e2e8f0;
-      border-radius: 5px; font-size: 13px; font-family: inherit; outline: none; background: #fff;
-    }
-    input:focus { border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,.12); }
-    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .btn-load {
-      width: 100%; margin-top: 12px; padding: 9px;
-      background: #6366f1; color: #fff; border: none;
-      border-radius: 5px; font-size: 13px; font-weight: 600;
-      cursor: pointer; font-family: inherit;
-    }
-    .btn-load:hover { background: #4f46e5; }
-    .btn-load:disabled { background: #a5b4fc; cursor: not-allowed; }
   </style>
 
 </head>
 <body>
-
-  <!-- Config panel: only visible when opened directly in browser, not in JotForm -->
-
-  <div class="builder-config" id="builderConfig">
-    <h3>🔧 Widget Setup — users won't see this</h3>
-    <div class="field-group">
-      <label class="field-label">JotForm API Key</label>
-      <input type="password" id="apiKey" placeholder="Paste your API key" />
-    </div>
-    <div class="field-group">
-      <label class="field-label">Table / Form ID</label>
-      <input type="text" id="tableId" placeholder="e.g. 1234567890" />
-      <div class="field-hint">From your table URL: jotform.com/tables/<strong>TABLE_ID</strong></div>
-    </div>
-    <div class="grid2">
-      <div class="field-group">
-        <label class="field-label">Display Column</label>
-        <input type="text" id="displayCol" placeholder="e.g. ProductName" />
-        <div class="field-hint">Label the user sees</div>
-      </div>
-      <div class="field-group">
-        <label class="field-label">Hidden Value Column</label>
-        <input type="text" id="lookupCol" placeholder="e.g. SKU" />
-        <div class="field-hint">Value submitted</div>
-      </div>
-    </div>
-    <div class="field-group">
-      <label class="field-label">Placeholder text</label>
-      <input type="text" id="placeholder" value="Select an option…" />
-    </div>
-    <button class="btn-load" id="btnLoad" onclick="loadTable()">Load Table & Preview Dropdown ↓</button>
-  </div>
 
   <div id="loadingState" class="loading-bar hidden">
     <div class="spinner"></div><span>Loading options…</span>
@@ -125,47 +66,65 @@
 <script>
   let lookupMap = {};
 
-  // ── JotForm Widget API setup ──────────────────
-  JFCustomWidget.subscribe("ready", function () {
-    // Hide config panel — we're inside JotForm
-    document.getElementById("builderConfig").classList.add("hidden");
+  // ── Widget Settings Manifest ──────────────────
+  // JotForm reads this to generate the settings panel
+  JFCustomWidget.settingsSection([
+    {
+      type: "text",
+      title: "JotForm API Key",
+      name: "apiKey",
+      description: "Your JotForm API key (My Account → API)"
+    },
+    {
+      type: "text",
+      title: "Table / Form ID",
+      name: "tableId",
+      description: "The ID from your table URL: jotform.com/tables/TABLE_ID"
+    },
+    {
+      type: "text",
+      title: "Display Column Name",
+      name: "displayCol",
+      description: "Column header the user will see in the dropdown (case-sensitive)"
+    },
+    {
+      type: "text",
+      title: "Hidden Value Column Name",
+      name: "lookupCol",
+      description: "Column header whose value gets submitted (case-sensitive)"
+    },
+    {
+      type: "text",
+      title: "Placeholder Text",
+      name: "placeholder",
+      description: "Default text shown before user selects"
+    }
+  ]);
 
-    const apiKey     = JFCustomWidget.getWidgetSetting("apiKey")     || "";
-    const tableId    = JFCustomWidget.getWidgetSetting("tableId")    || "";
-    const displayCol = JFCustomWidget.getWidgetSetting("displayCol") || "";
-    const lookupCol  = JFCustomWidget.getWidgetSetting("lookupCol")  || "";
+  // ── Ready: JotForm passes settings in ────────
+  JFCustomWidget.subscribe("ready", function () {
+    const apiKey      = JFCustomWidget.getWidgetSetting("apiKey")      || "";
+    const tableId     = JFCustomWidget.getWidgetSetting("tableId")     || "";
+    const displayCol  = JFCustomWidget.getWidgetSetting("displayCol")  || "";
+    const lookupCol   = JFCustomWidget.getWidgetSetting("lookupCol")   || "";
     const placeholder = JFCustomWidget.getWidgetSetting("placeholder") || "Select an option…";
 
     if (apiKey && tableId && displayCol && lookupCol) {
       loadTable(apiKey, tableId, displayCol, lookupCol, placeholder);
     } else {
-      showError("Widget not configured. Please set API Key, Table ID, and column names in the widget settings.");
+      showError("Configure this widget: click it in the builder and fill in the settings on the right panel.");
     }
   });
 
+  // ── Submit handler ────────────────────────────
   JFCustomWidget.subscribe("submit", function () {
     const val = document.getElementById("hiddenValue").value;
     JFCustomWidget.sendSubmit({ value: val, valid: val !== "" });
   });
 
-  // ── Load table rows from JotForm API ─────────
+  // ── Fetch rows from JotForm Table ─────────────
   async function loadTable(apiKey, tableId, displayCol, lookupCol, placeholder) {
-    // Called from builder button — read from inputs
-    if (!apiKey) {
-      apiKey      = document.getElementById("apiKey").value.trim();
-      tableId     = document.getElementById("tableId").value.trim();
-      displayCol  = document.getElementById("displayCol").value.trim();
-      lookupCol   = document.getElementById("lookupCol").value.trim();
-      placeholder = document.getElementById("placeholder").value.trim() || "Select an option…";
-    }
-    if (!apiKey || !tableId || !displayCol || !lookupCol) {
-      showError("Please fill in all configuration fields."); return;
-    }
-
-    const btn = document.getElementById("btnLoad");
-    if (btn) btn.disabled = true;
     showLoading();
-
     try {
       const url = `https://api.jotform.com/form/${tableId}/submissions` +
                   `?apiKey=${encodeURIComponent(apiKey)}&limit=1000&orderby=created_at`;
@@ -177,7 +136,6 @@
       const subs = (json.content || []).filter(s => s.status !== "DELETED");
       if (!subs.length) throw new Error("No rows found. Check the Table ID or add rows first.");
 
-      // Find which question key maps to each column name
       const firstAnswers = subs[0].answers || {};
       let displayKey = null, lookupKey = null;
       for (const [qid, ans] of Object.entries(firstAnswers)) {
@@ -188,7 +146,6 @@
       if (!displayKey) throw new Error(`Column "${displayCol}" not found. Available: ${Object.values(firstAnswers).map(a=>a.name).filter(Boolean).join(", ")}`);
       if (!lookupKey)  throw new Error(`Column "${lookupCol}" not found. Available: ${Object.values(firstAnswers).map(a=>a.name).filter(Boolean).join(", ")}`);
 
-      // Build dropdown
       lookupMap = {};
       const sel = document.getElementById("mainSelect");
       sel.innerHTML = `<option value="">${placeholder}</option>`;
@@ -205,8 +162,6 @@
 
     } catch (err) {
       showError(err.message);
-    } finally {
-      if (btn) btn.disabled = false;
     }
   }
 
