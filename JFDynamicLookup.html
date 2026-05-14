@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JotForm Table Lookup Widget</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: transparent;
+      padding: 4px 0;
+    }
+    .loading-bar {
+      display: flex; align-items: center; gap: 8px;
+      color: #9ca3af; font-size: 13px; padding: 10px 0;
+    }
+    .spinner {
+      width: 15px; height: 15px;
+      border: 2px solid #e5e7eb; border-top-color: #6366f1;
+      border-radius: 50%; animation: spin .7s linear infinite; flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .error-box { color: #ef4444; font-size: 13px; padding: 8px 0; }
+    .select-wrap { position: relative; }
+    select {
+      width: 100%; padding: 10px 36px 10px 12px;
+      border: 1px solid #d1d5db; border-radius: 6px;
+      background: #fff; font-size: 14px; color: #111827;
+      appearance: none; cursor: pointer; outline: none;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    select:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,.15); }
+    select:disabled { background: #f9fafb; color: #9ca3af; cursor: not-allowed; }
+    .chevron {
+      pointer-events: none; position: absolute; right: 10px;
+      top: 50%; transform: translateY(-50%); color: #9ca3af;
+    }
+    .hidden { display: none !important; }
+    .builder-config {
+      background: #f8fafc; border: 1px dashed #cbd5e1;
+      border-radius: 8px; padding: 16px; margin-bottom: 12px;
+    }
+    .builder-config h3 {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .06em; color: #94a3b8; margin-bottom: 12px;
+    }
+    .field-group { margin-bottom: 10px; }
+    .field-label { display: block; font-size: 11px; font-weight: 600; color: #475569; margin-bottom: 4px; }
+    .field-hint { font-size: 11px; color: #94a3b8; margin-top: 3px; }
+    input[type="text"], input[type="password"] {
+      width: 100%; padding: 7px 10px; border: 1px solid #e2e8f0;
+      border-radius: 5px; font-size: 13px; font-family: inherit; outline: none; background: #fff;
+    }
+    input:focus { border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,.12); }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .btn-load {
+      width: 100%; margin-top: 12px; padding: 9px;
+      background: #6366f1; color: #fff; border: none;
+      border-radius: 5px; font-size: 13px; font-weight: 600;
+      cursor: pointer; font-family: inherit;
+    }
+    .btn-load:hover { background: #4f46e5; }
+    .btn-load:disabled { background: #a5b4fc; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+
+  <div class="builder-config" id="builderConfig">
+    <h3>🔧 Widget Setup — users won't see this</h3>
+    <div class="field-group">
+      <label class="field-label">JotForm API Key</label>
+      <input type="password" id="apiKey" placeholder="Paste your API key" />
+    </div>
+    <div class="field-group">
+      <label class="field-label">Table / Form ID</label>
+      <input type="text" id="tableId" placeholder="e.g. 1234567890" />
+      <div class="field-hint">From your table URL: jotform.com/tables/<strong>TABLE_ID</strong></div>
+    </div>
+    <div class="grid2">
+      <div class="field-group">
+        <label class="field-label">Display Column</label>
+        <input type="text" id="displayCol" placeholder="e.g. ProductName" />
+        <div class="field-hint">Label the user sees</div>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Hidden Value Column</label>
+        <input type="text" id="lookupCol" placeholder="e.g. SKU" />
+        <div class="field-hint">Value that gets submitted</div>
+      </div>
+    </div>
+    <div class="field-group">
+      <label class="field-label">Placeholder text</label>
+      <input type="text" id="placeholder" value="Select an option…" />
+    </div>
+    <button class="btn-load" id="btnLoad" onclick="loadTable()">Load Table & Preview Dropdown ↓</button>
+  </div>
+
+  <div id="loadingState" class="loading-bar hidden">
+    <div class="spinner"></div><span>Loading options…</span>
+  </div>
+  <div id="errorState" class="error-box hidden"></div>
+  <div id="dropdownWrap" class="select-wrap hidden">
+    <select id="mainSelect" onchange="onSelectChange(this)">
+      <option value="">Select an option…</option>
+    </select>
+    <svg class="chevron" width="16" height="16" viewBox="0 0 20 20" fill="currentColor">
+      <path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clip-rule="evenodd"/>
+    </svg>
+  </div>
+  <input type="hidden" id="hiddenValue" name="lookupValue" value="" />
+
+<script>
+  let lookupMap = {};
+  const isEmbedded = typeof JFCustomWidget !== "undefined";
+
+  if (isEmbedded) {
+    document.getElementById("builderConfig").classList.add("hidden");
+    JFCustomWidget.subscribe("ready", function () {
+      const s = (k) => JFCustomWidget.getWidgetSetting(k) || "";
+      loadTable(s("apiKey"), s("tableId"), s("displayCol"), s("lookupCol"), s("placeholder") || "Select an option…");
+    });
+    JFCustomWidget.subscribe("submit", function () {
+      const val = document.getElementById("hiddenValue").value;
+      JFCustomWidget.sendSubmit({ value: val, valid: val !== "" });
+    });
+  }
+
+  async function loadTable(apiKey, tableId, displayCol, lookupCol, placeholder) {
+    if (!apiKey) {
+      apiKey      = document.getElementById("apiKey").value.trim();
+      tableId     = document.getElementById("tableId").value.trim();
+      displayCol  = document.getElementById("displayCol").value.trim();
+      lookupCol   = document.getElementById("lookupCol").value.trim();
+      placeholder = document.getElementById("placeholder").value.trim() || "Select an option…";
+    }
+    if (!apiKey || !tableId || !displayCol || !lookupCol) {
+      showError("Please fill in all configuration fields above."); return;
+    }
+    const btn = document.getElementById("btnLoad");
+    if (btn) btn.disabled = true;
+    showLoading();
+    try {
+      const url = `https://api.jotform.com/form/${tableId}/submissions?apiKey=${encodeURIComponent(apiKey)}&limit=1000&orderby=created_at`;
+      const res  = await fetch(url);
+      const json = await res.json();
+      if (json.responseCode !== 200) throw new Error(json.message || `API error ${json.responseCode}`);
+      const subs = (json.content || []).filter(s => s.status !== "DELETED");
+      if (!subs.length) throw new Error("No rows found. Check the Table ID or add rows first.");
+      const firstAnswers = subs[0].answers || {};
+      let displayKey = null, lookupKey = null;
+      for (const [qid, ans] of Object.entries(firstAnswers)) {
+        const name = (ans.name || "").toLowerCase();
+        if (name === displayCol.toLowerCase()) displayKey = qid;
+        if (name === lookupCol.toLowerCase())  lookupKey  = qid;
+      }
+      if (!displayKey) throw new Error(`Column "${displayCol}" not found. Available: ${Object.values(firstAnswers).map(a=>a.name).filter(Boolean).join(", ")}`);
+      if (!lookupKey)  throw new Error(`Column "${lookupCol}" not found. Available: ${Object.values(firstAnswers).map(a=>a.name).filter(Boolean).join(", ")}`);
+      lookupMap = {};
+      const sel = document.getElementById("mainSelect");
+      sel.innerHTML = `<option value="">${placeholder}</option>`;
+      for (const sub of subs) {
+        const display = extractValue((sub.answers||{})[displayKey]);
+        const hidden  = extractValue((sub.answers||{})[lookupKey]);
+        if (!display) continue;
+        lookupMap[display] = hidden;
+        const opt = document.createElement("option");
+        opt.value = display; opt.textContent = display;
+        sel.appendChild(opt);
+      }
+      showDropdown(placeholder);
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  function extractValue(ans) {
+    if (!ans) return "";
+    const v = ans.answer ?? ans.prettyFormat ?? "";
+    if (typeof v === "string")  return v.trim();
+    if (Array.isArray(v))       return v.join(", ").trim();
+    if (typeof v === "object")  return Object.values(v).filter(Boolean).join(" ").trim();
+    return String(v).trim();
+  }
+
+  function onSelectChange(sel) {
+    const hidden = sel.value ? (lookupMap[sel.value] || "") : "";
+    document.getElementById("hiddenValue").value = hidden;
+    if (isEmbedded) JFCustomWidget.sendData({ value: hidden, valid: hidden !== "" });
+  }
+
+  function showLoading() {
+    document.getElementById("loadingState").classList.remove("hidden");
+    document.getElementById("errorState").classList.add("hidden");
+    document.getElementById("dropdownWrap").classList.add("hidden");
+  }
+  function showError(msg) {
+    document.getElementById("errorState").textContent = "⚠️ " + msg;
+    document.getElementById("errorState").classList.remove("hidden");
+    document.getElementById("loadingState").classList.add("hidden");
+    document.getElementById("dropdownWrap").classList.add("hidden");
+  }
+  function showDropdown(placeholder) {
+    document.getElementById("mainSelect").options[0].textContent = placeholder || "Select an option…";
+    document.getElementById("dropdownWrap").classList.remove("hidden");
+    document.getElementById("loadingState").classList.add("hidden");
+    document.getElementById("errorState").classList.add("hidden");
+    if (isEmbedded) JFCustomWidget.requestFrameResize({ height: 50 });
+  }
+</script>
+
+</body>
+</html>
