@@ -53,10 +53,10 @@
       <path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clip-rule="evenodd"/>
     </svg>
   </div>
-  <input type="hidden" id="hiddenVal" value="" />
 
 <script>
   var lookupMap = {};
+  var currentValue = '';  // track selected hidden value
 
   function setMsg(t)  { show('msg'); document.getElementById('msg').textContent = t; }
   function setErr(t)  { show('err'); document.getElementById('err').textContent = '⚠️ ' + t; }
@@ -73,7 +73,6 @@
     });
   }
 
-  // Init after DOM ready
   document.addEventListener('DOMContentLoaded', function() {
     setMsg('Widget loaded. Waiting for JotForm...');
 
@@ -91,31 +90,28 @@
           var lookCol = JFCustomWidget.getWidgetSetting('lookupCol')   || '';
           var ph      = JFCustomWidget.getWidgetSetting('placeholder') || 'Select an option…';
 
-          setMsg('Settings received. apiKey=' + (apiKey ? 'YES' : 'NO') +
-                 ' tableId=' + (tableId || 'MISSING') +
-                 ' displayCol=' + (dispCol || 'MISSING') +
-                 ' lookupCol=' + (lookCol || 'MISSING'));
-
           if (!tableId || !dispCol || !lookCol) {
-            setErr('Missing settings. Please fill in Table ID, Display Column and Hidden Value Column in the widget settings panel.');
+            setErr('Missing settings. Please fill in all widget parameters.');
             return;
           }
-
           if (!apiKey) {
-            setErr('Missing API Key. Please add it in the widget settings panel.');
+            setErr('Missing API Key in widget settings.');
             return;
           }
 
           loadTable(apiKey, tableId, dispCol, lookCol, ph);
 
         } catch(e) {
-          setErr('Ready handler error: ' + e.message);
+          setErr('Ready error: ' + e.message);
         }
       });
 
+      // ── Key fix: return current value on submit ──
       JFCustomWidget.subscribe('submit', function() {
-        var val = document.getElementById('hiddenVal').value;
-        JFCustomWidget.sendSubmit({ value: val, valid: val !== '' });
+        JFCustomWidget.sendSubmit({
+          value: currentValue,
+          valid: currentValue !== ''
+        });
       });
 
     } catch(e) {
@@ -187,9 +183,16 @@
   }
 
   function onChange(sel) {
-    var hidden = sel.value ? (lookupMap[sel.value] || '') : '';
-    document.getElementById('hiddenVal').value = hidden;
-    try { JFCustomWidget.sendData({ value: hidden, valid: hidden !== '' }); } catch(e) {}
+    // Store hidden value in module-level var so submit handler can access it
+    currentValue = sel.value ? (lookupMap[sel.value] || '') : '';
+
+    // Also notify JotForm immediately on change
+    try {
+      JFCustomWidget.sendData({
+        value: currentValue,
+        valid: currentValue !== ''
+      });
+    } catch(e) {}
   }
 </script>
 
