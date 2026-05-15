@@ -5,36 +5,32 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>JotForm Table Lookup Widget</title>
-
-  <!-- JotForm Widget API - must be first -->
-
   <script src="https://js.jotform.com/JotFormCustomWidget.min.js"></script>
-
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: transparent;
-      padding: 4px 0;
+      background: #fff;
+      padding: 6px;
     }
+    .msg { font-size: 13px; color: #6b7280; padding: 8px 0; }
+    .err { font-size: 13px; color: #ef4444; padding: 8px 0; }
     .loading-bar {
       display: flex; align-items: center; gap: 8px;
-      color: #9ca3af; font-size: 13px; padding: 10px 0;
+      color: #9ca3af; font-size: 13px; padding: 8px 0;
     }
     .spinner {
-      width: 15px; height: 15px;
+      width: 14px; height: 14px;
       border: 2px solid #e5e7eb; border-top-color: #6366f1;
       border-radius: 50%; animation: spin .7s linear infinite; flex-shrink: 0;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .error-box { color: #ef4444; font-size: 13px; padding: 8px 0; }
     .select-wrap { position: relative; }
     select {
       width: 100%; padding: 10px 36px 10px 12px;
       border: 1px solid #d1d5db; border-radius: 6px;
       background: #fff; font-size: 14px; color: #111827;
       appearance: none; cursor: pointer; outline: none;
-      transition: border-color .15s, box-shadow .15s;
     }
     select:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,.15); }
     .chevron {
@@ -43,160 +39,157 @@
     }
     .hidden { display: none !important; }
   </style>
-
 </head>
 <body>
 
-  <div id="loadingState" class="loading-bar hidden">
-    <div class="spinner"></div><span>Loading options…</span>
-  </div>
-  <div id="errorState" class="error-box hidden"></div>
-
-  <div id="dropdownWrap" class="select-wrap hidden">
-    <select id="mainSelect" onchange="onSelectChange(this)">
+  <div id="msg"    class="msg">Starting up...</div>
+  <div id="loader" class="loading-bar hidden"><div class="spinner"></div><span>Loading options…</span></div>
+  <div id="err"    class="err hidden"></div>
+  <div id="wrap"   class="select-wrap hidden">
+    <select id="sel" onchange="onChange(this)">
       <option value="">Select an option…</option>
     </select>
     <svg class="chevron" width="16" height="16" viewBox="0 0 20 20" fill="currentColor">
       <path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clip-rule="evenodd"/>
     </svg>
   </div>
-
-  <input type="hidden" id="hiddenValue" name="lookupValue" value="" />
+  <input type="hidden" id="hiddenVal" value="" />
 
 <script>
-  let lookupMap = {};
+  var lookupMap = {};
 
-  // ── Widget Settings Manifest ──────────────────
-  // JotForm reads this to generate the settings panel
-  JFCustomWidget.settingsSection([
-    {
-      type: "text",
-      title: "JotForm API Key",
-      name: "apiKey",
-      description: "Your JotForm API key (My Account → API)"
-    },
-    {
-      type: "text",
-      title: "Table / Form ID",
-      name: "tableId",
-      description: "The ID from your table URL: jotform.com/tables/TABLE_ID"
-    },
-    {
-      type: "text",
-      title: "Display Column Name",
-      name: "displayCol",
-      description: "Column header the user will see in the dropdown (case-sensitive)"
-    },
-    {
-      type: "text",
-      title: "Hidden Value Column Name",
-      name: "lookupCol",
-      description: "Column header whose value gets submitted (case-sensitive)"
-    },
-    {
-      type: "text",
-      title: "Placeholder Text",
-      name: "placeholder",
-      description: "Default text shown before user selects"
-    }
-  ]);
+  function setMsg(t)  { show('msg'); document.getElementById('msg').textContent = t; }
+  function setErr(t)  { show('err'); document.getElementById('err').textContent = '⚠️ ' + t; }
+  function setLoad()  { show('loader'); }
+  function setDrop(p) {
+    document.getElementById('sel').options[0].textContent = p || 'Select an option…';
+    show('wrap');
+    try { JFCustomWidget.requestFrameResize({ height: 52 }); } catch(e) {}
+  }
 
-  // ── Ready: JotForm passes settings in ────────
-  JFCustomWidget.subscribe("ready", function () {
-    const apiKey      = JFCustomWidget.getWidgetSetting("apiKey")      || "";
-    const tableId     = JFCustomWidget.getWidgetSetting("tableId")     || "";
-    const displayCol  = JFCustomWidget.getWidgetSetting("displayCol")  || "";
-    const lookupCol   = JFCustomWidget.getWidgetSetting("lookupCol")   || "";
-    const placeholder = JFCustomWidget.getWidgetSetting("placeholder") || "Select an option…";
+  function show(id) {
+    ['msg','loader','err','wrap'].forEach(function(i) {
+      document.getElementById(i).classList[i === id ? 'remove' : 'add']('hidden');
+    });
+  }
 
-    if (apiKey && tableId && displayCol && lookupCol) {
-      loadTable(apiKey, tableId, displayCol, lookupCol, placeholder);
-    } else {
-      showError("Configure this widget: click it in the builder and fill in the settings on the right panel.");
-    }
-  });
+  // Init after DOM ready
+  document.addEventListener('DOMContentLoaded', function() {
+    setMsg('Widget loaded. Waiting for JotForm...');
 
-  // ── Submit handler ────────────────────────────
-  JFCustomWidget.subscribe("submit", function () {
-    const val = document.getElementById("hiddenValue").value;
-    JFCustomWidget.sendSubmit({ value: val, valid: val !== "" });
-  });
-
-  // ── Fetch rows from JotForm Table ─────────────
-  async function loadTable(apiKey, tableId, displayCol, lookupCol, placeholder) {
-    showLoading();
     try {
-      const url = `https://api.jotform.com/form/${tableId}/submissions` +
-                  `?apiKey=${encodeURIComponent(apiKey)}&limit=1000&orderby=created_at`;
-      const res  = await fetch(url);
-      const json = await res.json();
-
-      if (json.responseCode !== 200) throw new Error(json.message || `API error ${json.responseCode}`);
-
-      const subs = (json.content || []).filter(s => s.status !== "DELETED");
-      if (!subs.length) throw new Error("No rows found. Check the Table ID or add rows first.");
-
-      const firstAnswers = subs[0].answers || {};
-      let displayKey = null, lookupKey = null;
-      for (const [qid, ans] of Object.entries(firstAnswers)) {
-        const name = (ans.name || "").toLowerCase();
-        if (name === displayCol.toLowerCase()) displayKey = qid;
-        if (name === lookupCol.toLowerCase())  lookupKey  = qid;
+      if (typeof JFCustomWidget === 'undefined') {
+        setMsg('Loaded OK — add to JotForm form to configure.');
+        return;
       }
-      if (!displayKey) throw new Error(`Column "${displayCol}" not found. Available: ${Object.values(firstAnswers).map(a=>a.name).filter(Boolean).join(", ")}`);
-      if (!lookupKey)  throw new Error(`Column "${lookupCol}" not found. Available: ${Object.values(firstAnswers).map(a=>a.name).filter(Boolean).join(", ")}`);
+
+      JFCustomWidget.subscribe('ready', function() {
+        try {
+          var apiKey  = JFCustomWidget.getWidgetSetting('apiKey')      || '';
+          var tableId = JFCustomWidget.getWidgetSetting('tableId')     || '';
+          var dispCol = JFCustomWidget.getWidgetSetting('displayCol')  || '';
+          var lookCol = JFCustomWidget.getWidgetSetting('lookupCol')   || '';
+          var ph      = JFCustomWidget.getWidgetSetting('placeholder') || 'Select an option…';
+
+          setMsg('Settings received. apiKey=' + (apiKey ? 'YES' : 'NO') +
+                 ' tableId=' + (tableId || 'MISSING') +
+                 ' displayCol=' + (dispCol || 'MISSING') +
+                 ' lookupCol=' + (lookCol || 'MISSING'));
+
+          if (!tableId || !dispCol || !lookCol) {
+            setErr('Missing settings. Please fill in Table ID, Display Column and Hidden Value Column in the widget settings panel.');
+            return;
+          }
+
+          if (!apiKey) {
+            setErr('Missing API Key. Please add it in the widget settings panel.');
+            return;
+          }
+
+          loadTable(apiKey, tableId, dispCol, lookCol, ph);
+
+        } catch(e) {
+          setErr('Ready handler error: ' + e.message);
+        }
+      });
+
+      JFCustomWidget.subscribe('submit', function() {
+        var val = document.getElementById('hiddenVal').value;
+        JFCustomWidget.sendSubmit({ value: val, valid: val !== '' });
+      });
+
+    } catch(e) {
+      setErr('Init error: ' + e.message);
+    }
+  });
+
+  async function loadTable(apiKey, tableId, dispCol, lookCol, ph) {
+    setLoad();
+    try {
+      var url = 'https://api.jotform.com/form/' + tableId +
+                '/submissions?apiKey=' + encodeURIComponent(apiKey) +
+                '&limit=1000&orderby=created_at';
+
+      var res  = await fetch(url);
+      var json = await res.json();
+
+      if (json.responseCode !== 200) throw new Error(json.message || 'API error ' + json.responseCode);
+
+      var subs = (json.content || []).filter(function(s) { return s.status !== 'DELETED'; });
+      if (!subs.length) throw new Error('No rows found. Check the Table ID.');
+
+      var firstAnswers = subs[0].answers || {};
+      var displayKey = null, lookupKey = null;
+
+      Object.keys(firstAnswers).forEach(function(qid) {
+        var name = (firstAnswers[qid].name || '').toLowerCase();
+        if (name === dispCol.toLowerCase()) displayKey = qid;
+        if (name === lookCol.toLowerCase()) lookupKey  = qid;
+      });
+
+      if (!displayKey) {
+        var cols = Object.values(firstAnswers).map(function(a){ return a.name; }).filter(Boolean).join(', ');
+        throw new Error('Column "' + dispCol + '" not found. Available: ' + cols);
+      }
+      if (!lookupKey) {
+        var cols = Object.values(firstAnswers).map(function(a){ return a.name; }).filter(Boolean).join(', ');
+        throw new Error('Column "' + lookCol + '" not found. Available: ' + cols);
+      }
 
       lookupMap = {};
-      const sel = document.getElementById("mainSelect");
-      sel.innerHTML = `<option value="">${placeholder}</option>`;
-      for (const sub of subs) {
-        const display = extractValue((sub.answers||{})[displayKey]);
-        const hidden  = extractValue((sub.answers||{})[lookupKey]);
-        if (!display) continue;
+      var sel = document.getElementById('sel');
+      sel.innerHTML = '<option value="">' + ph + '</option>';
+
+      subs.forEach(function(sub) {
+        var display = extractValue((sub.answers||{})[displayKey]);
+        var hidden  = extractValue((sub.answers||{})[lookupKey]);
+        if (!display) return;
         lookupMap[display] = hidden;
-        const opt = document.createElement("option");
+        var opt = document.createElement('option');
         opt.value = display; opt.textContent = display;
         sel.appendChild(opt);
-      }
-      showDropdown(placeholder);
+      });
 
-    } catch (err) {
-      showError(err.message);
+      setDrop(ph);
+
+    } catch(e) {
+      setErr(e.message);
     }
   }
 
   function extractValue(ans) {
-    if (!ans) return "";
-    const v = ans.answer ?? ans.prettyFormat ?? "";
-    if (typeof v === "string")  return v.trim();
-    if (Array.isArray(v))       return v.join(", ").trim();
-    if (typeof v === "object")  return Object.values(v).filter(Boolean).join(" ").trim();
+    if (!ans) return '';
+    var v = ans.answer !== undefined ? ans.answer : (ans.prettyFormat || '');
+    if (typeof v === 'string')  return v.trim();
+    if (Array.isArray(v))       return v.join(', ').trim();
+    if (typeof v === 'object')  return Object.values(v).filter(Boolean).join(' ').trim();
     return String(v).trim();
   }
 
-  function onSelectChange(sel) {
-    const hidden = sel.value ? (lookupMap[sel.value] || "") : "";
-    document.getElementById("hiddenValue").value = hidden;
-    JFCustomWidget.sendData({ value: hidden, valid: hidden !== "" });
-  }
-
-  function showLoading() {
-    document.getElementById("loadingState").classList.remove("hidden");
-    document.getElementById("errorState").classList.add("hidden");
-    document.getElementById("dropdownWrap").classList.add("hidden");
-  }
-  function showError(msg) {
-    document.getElementById("errorState").textContent = "⚠️ " + msg;
-    document.getElementById("errorState").classList.remove("hidden");
-    document.getElementById("loadingState").classList.add("hidden");
-    document.getElementById("dropdownWrap").classList.add("hidden");
-  }
-  function showDropdown(placeholder) {
-    document.getElementById("mainSelect").options[0].textContent = placeholder || "Select an option…";
-    document.getElementById("dropdownWrap").classList.remove("hidden");
-    document.getElementById("loadingState").classList.add("hidden");
-    document.getElementById("errorState").classList.add("hidden");
-    JFCustomWidget.requestFrameResize({ height: 50 });
+  function onChange(sel) {
+    var hidden = sel.value ? (lookupMap[sel.value] || '') : '';
+    document.getElementById('hiddenVal').value = hidden;
+    try { JFCustomWidget.sendData({ value: hidden, valid: hidden !== '' }); } catch(e) {}
   }
 </script>
 
